@@ -33,8 +33,9 @@ dns_he_add() {
   # Fills in the $_zone_id
   _find_zone "$_full_domain" || return 1
   _debug "Zone id \"$_zone_id\" will be used."
-
-  body="email=${HE_Username}&pass=${HE_Password}"
+  username_encoded="$(printf "%s" "${HE_Username}" | _url_encode)"
+  password_encoded="$(printf "%s" "${HE_Password}" | _url_encode)"
+  body="email=${username_encoded}&pass=${password_encoded}"
   body="$body&account="
   body="$body&menu=edit_zone"
   body="$body&Type=TXT"
@@ -71,7 +72,9 @@ dns_he_rm() {
   _debug "Zone id \"$_zone_id\" will be used."
 
   # Find the record id to clean
-  body="email=${HE_Username}&pass=${HE_Password}"
+  username_encoded="$(printf "%s" "${HE_Username}" | _url_encode)"
+  password_encoded="$(printf "%s" "${HE_Password}" | _url_encode)"
+  body="email=${username_encoded}&pass=${password_encoded}"
   body="$body&hosted_dns_zoneid=$_zone_id"
   body="$body&menu=edit_zone"
   body="$body&hosted_dns_editzone="
@@ -89,7 +92,9 @@ dns_he_rm() {
     return 1
   fi
   # Remove the record
-  body="email=${HE_Username}&pass=${HE_Password}"
+  username_encoded="$(printf "%s" "${HE_Username}" | _url_encode)"
+  password_encoded="$(printf "%s" "${HE_Password}" | _url_encode)"
+  body="email=${username_encoded}&pass=${password_encoded}"
   body="$body&menu=edit_zone"
   body="$body&hosted_dns_zoneid=$_zone_id"
   body="$body&hosted_dns_recordid=$_record_id"
@@ -112,9 +117,15 @@ dns_he_rm() {
 
 _find_zone() {
   _domain="$1"
-  body="email=${HE_Username}&pass=${HE_Password}"
+  username_encoded="$(printf "%s" "${HE_Username}" | _url_encode)"
+  password_encoded="$(printf "%s" "${HE_Password}" | _url_encode)"
+  body="email=${username_encoded}&pass=${password_encoded}"
   response="$(_post "$body" "https://dns.he.net/")"
   _debug2 response "$response"
+  if _contains "$response" '>Incorrect<'; then
+    _err "Unable to login to dns.he.net please check username and password"
+    return 1
+  fi
   _table="$(echo "$response" | tr -d "#" | sed "s/<table/#<table/g" | tr -d "\n" | tr "#" "\n" | grep 'id="domains_table"')"
   _debug2 _table "$_table"
   _matches="$(echo "$_table" | sed "s/<tr/#<tr/g" | tr "#" "\n" | grep 'alt="edit"' | tr -d " " | sed "s/<td/#<td/g" | tr "#" "\n" | grep 'hosted_dns_zoneid')"
@@ -123,9 +134,9 @@ _find_zone() {
   _zone_ids=$(echo "$_matches" | _egrep_o "hosted_dns_zoneid=[0-9]*&" | cut -d = -f 2 | tr -d '&')
   _zone_names=$(echo "$_matches" | _egrep_o "name=.*onclick" | cut -d '"' -f 2)
   _debug2 "These are the zones on this HE account:"
-  _debug2 "$_zone_names"
+  _debug2 "_zone_names" "$_zone_names"
   _debug2 "And these are their respective IDs:"
-  _debug2 "$_zone_ids"
+  _debug2 "_zone_ids" "$_zone_ids"
   if [ -z "$_zone_names" ] || [ -z "$_zone_ids" ]; then
     _err "Can not get zone names."
     return 1
@@ -143,10 +154,14 @@ _find_zone() {
 
     _debug "Looking for zone \"${_attempted_zone}\""
 
-    line_num="$(echo "$_zone_names" | grep -n "$_attempted_zone" | cut -d : -f 1)"
-
+    line_num="$(echo "$_zone_names" | grep -n "^$_attempted_zone\$" | _head_n 1 | cut -d : -f 1)"
+    _debug2 line_num "$line_num"
     if [ "$line_num" ]; then
       _zone_id=$(echo "$_zone_ids" | sed -n "${line_num}p")
+      if [ -z "$_zone_id" ]; then
+        _err "Can not find zone id."
+        return 1
+      fi
       _debug "Found relevant zone \"$_attempted_zone\" with id \"$_zone_id\" - will be used for domain \"$_domain\"."
       return 0
     fi
